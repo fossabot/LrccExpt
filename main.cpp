@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2018 Pandorym
+ * Copyright (C) 2018 Pandorym <i@Pandorym.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
@@ -17,6 +17,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include "string.h"
 #include <algorithm>
 #include <iterator>
 #include <vector>
@@ -27,9 +28,15 @@
 #include "sqlite3pp/sqlite3pp.h"
 #include <unistd.h>
 #include <pwd.h>
+#include <dirent.h>
+#include<sys/types.h>
+#include <regex>
 
 using namespace std;
 
+string DEFAULT_LRLIB;
+
+/* quantity */
 struct QTY {
     int total = 0;
     int exist = 0;
@@ -51,8 +58,15 @@ struct FileInfo {
     string xmpPath;
 };
 
-vector <string> split(const string &s, const string &seperator) {
-    vector <string> result;
+struct User {
+    string name;
+    string email;
+    string id;
+    string cat;
+};
+
+vector<string> split(const string &s, const string &seperator) {
+    vector<string> result;
     typedef string::size_type string_size;
     string_size i = 0;
 
@@ -96,15 +110,179 @@ string getSuffix(string path) {
     return split(path, ".").back();
 }
 
+
+string getCurrentTerminalUesr() {
+    return getpwuid(getuid())->pw_name;
+}
+
+vector<string> getUserdb_Path(string userdir_path) {
+    vector<string> userdb_paths;
+
+    regex r("oz-user-[^.\s]{32}");
+
+    dirent *ptr;
+    DIR *userDir = opendir(userdir_path.c_str());
+
+    while ((ptr = readdir(userDir)) != nullptr) {
+        string filename = ptr->d_name;
+
+        if (regex_match(filename, r))
+            userdb_paths.push_back(userdir_path + filename);
+    }
+    closedir(userDir);
+
+    return userdb_paths;
+}
+
+Json::Value parseAnnotation(string rawAnnotation) {
+    vector<Line_AND_Space> LS;
+    istringstream f(rawAnnotation);
+
+    string line;
+    while (getline(f, line)) {
+        Line_AND_Space currentLine;
+
+        int space = 0;
+        for (; line[space] == '\t'; space++);
+
+        long separatorIndex = line.find(" = ");
+        if (separatorIndex != -1) {
+            line = line.replace(static_cast<unsigned long>(separatorIndex), 3, ": ");
+
+            for (long i = space; i < separatorIndex; i++)
+                if (line[i] == '\"') line[i] = '\'';
+
+            line.insert(line.begin() + separatorIndex, '\"');
+            line.insert(line.begin() + space, '\"');
+        }
+
+        currentLine.line = line;
+        currentLine.space = space;
+
+        if (LS.size() > 1) {
+
+            Line_AND_Space lastLine = LS.back();
+            if (lastLine.space > currentLine.space) {
+                lastLine.line.pop_back();
+
+                LS.pop_back();
+                LS.push_back(lastLine);
+            }
+        }
+
+        LS.push_back(currentLine);
+
+    }
+
+    string strAnnotation;
+    for (auto &i : LS) {
+        strAnnotation += i.line + '\n';
+    }
+
+    Json::Reader JsonParser;
+    Json::Value jsonAnnotation;
+
+    if (!JsonParser.parse(strAnnotation, jsonAnnotation)) {
+        // cout << "parse error" << endl;
+        // cout << JsonParser.getStructuredErrors()[0].message << endl;
+    }
+    // cout << jsonAnnotation << endl;
+
+    return jsonAnnotation;
+}
+
+/***
+ * copy file from src_path to dst_path
+ * @param src_path
+ * @param dst_path
+ * @return 0: succ; 1: src error; 2: dst error;
+ */
+int copyFile(string src_path, string dst_path) {
+    ifstream src(src_path, ios::binary);
+    ofstream dst(dst_path, ios::binary);
+
+    if (src.fail() || dst.fail()) goto closeStream;
+
+    dst << src.rdbuf();
+
+    closeStream:
+    src.close();
+    dst.close();
+
+    if (src.fail()) return 1;
+    if (dst.fail()) return 2;
+    return 0;
+}
+
+User getUser(const string &userdb_path) {
+    User user;
+
+    sqlite3pp::database db(userdb_path.c_str());
+
+    sqlite3pp::query *qry;
+    string annotation_str;
+
+    qry = new sqlite3pp::query{db, "SELECT annotation FROM docs"};
+    tie(annotation_str) = (*qry->begin()).get_columns < char const* > (0);
+    user.cat = parseAnnotation(annotation_str)["_localOnly"]["managedCatalog"]["id"].asString();
+
+    qry = new sqlite3pp::query{db, "SELECT content FROM revs WHERE current = 1"};
+    tie(annotation_str) = (*qry->begin()).get_columns < char const* > (0);
+    auto content = parseAnnotation(annotation_str);
+    user.id = content["id"].asString();
+    user.name = content["full_name"].asString();
+    user.email = content["email"].asString();
+
+    return user;
+
+}
+
+vector<User> getUsers(string lrlib_path) {
+    string userdir_path = lrlib_path + "/user/";
+    vector<string> userdb_paths = getUserdb_Path(userdir_path);
+
+    vector<User> Users;
+    Users.reserve(userdb_paths.size());
+    for (const auto &userdb_path : userdb_paths) {
+        Users.push_back(getUser(userdb_path));
+    }
+
+    return Users;
+}
+
 int main() {
-    sqlite3pp::database db("/Users/pandorym/Pictures/Lightroom Library.lrlibrary/c77d608db1a44a4d9ab8deee035bcd79/Managed Catalog.mcat");
+
+    DEFAULT_LRLIB = "/Users/" + getCurrentTerminalUesr() + "/Pictures/Lightroom Library.lrlibrary/";
+
+    cout << DEFAULT_LRLIB << endl;
+
+    auto users = getUsers(DEFAULT_LRLIB);
+
+    int i(0);
+    for (auto &user : users) {
+        cout << ++i << ". " << user.cat << " " << user.id << " \"" << user.name << "\" " << user.email << endl;
+    }
+
+    cout << "select the user (Enter NO., default is \e[36m1\e[0m): ";
+
+    char *strUserNo;
+    cin.getline(strUserNo, 10);
+    int userNo;
+    if (strUserNo[0] == '\0') userNo = 0;
+    else userNo = atoi(strUserNo) - 1;
+
+
+    string mcat_path = DEFAULT_LRLIB + users[userNo].cat + "/Managed Catalog.mcat";
+
+    sqlite3pp::database db(mcat_path.c_str());
+    cout << "open mcat: " + mcat_path << endl;
 
     system("mkdir imgFile");
 
     sqlite3pp::query qry(db, "SELECT * FROM docs");
 
     QTY qty;
-    vector <DOC> docs;
+    vector<DOC> docs;
 
     for (auto v : qry) {
         DOC doc;
@@ -125,64 +303,13 @@ int main() {
          << " (" << qty.total << "-" << qty.deleted << ")" << endl;
 
 
-    vector <FileInfo> fileInfos;
+    vector<FileInfo> fileInfos;
 
     map<string, int> suffix;
 
     for (auto &doc : docs) {
 
-        vector <Line_AND_Space> LS;
-
-        std::istringstream f(doc.annotation);
-
-        string line;
-        while (getline(f, line)) {
-            Line_AND_Space currentLine;
-
-            int space = 0;
-            for (; line[space] == '\t'; space++);
-
-            long separatorIndex = line.find(" = ");
-            if (separatorIndex != -1) {
-                line = line.replace(separatorIndex, 3, ": ");
-
-                for (long i = space; i < separatorIndex; i++)
-                    if (line[i] == '\"') line[i] = '\'';
-
-                line.insert(line.begin() + separatorIndex, '\"');
-                line.insert(line.begin() + space, '\"');
-            }
-
-            currentLine.line = line;
-            currentLine.space = space;
-
-            if (LS.size() > 1) {
-
-                Line_AND_Space lastLine = LS.back();
-                if (lastLine.space > currentLine.space) {
-                    lastLine.line.pop_back();
-
-                    LS.pop_back();
-                    LS.push_back(lastLine);
-                }
-            }
-
-            LS.push_back(currentLine);
-
-        }
-
-        string strAnnotation;
-        for (auto &i : LS) {
-            strAnnotation += i.line + '\n';
-        }
-
-        Json::Reader JsonParser;
-        Json::Value jsonAnnotation;
-
-        if (!JsonParser.parse(strAnnotation, jsonAnnotation)) {
-            // cout << "parse error" << endl;
-            // cout << JsonParser.getStructuredErrors()[0].message << endl;
-        }
+        Json::Value jsonAnnotation = parseAnnotation(doc.annotation);
 
         FileInfo fileInfo;
 
@@ -190,56 +317,48 @@ int main() {
 
         if (!masterPath.empty() && !doc.deleted) {
 
-            cout << "Parse: " << doc.localDocId << " ";
+            cout << "Parse: " << doc.localDocId << "/" << docs.size() << " ";
 
             string masterName = getName(masterPath);
             string masterSuffix = getSuffix(masterPath);
             transform(masterSuffix.begin(), masterSuffix.end(), masterSuffix.begin(), ::toupper);
             suffix[masterSuffix]++;
 
-            cout << doc.deleted << " " << doc.hasConflicts << " \"/" + masterPath << "\"";
+            cout << doc.deleted << " " << doc.hasConflicts << " \"/" + masterPath << "\" => "
+                 << "\"./imgFile/" + masterName + "\"";
 
-
-            ifstream src;
-            ofstream dst;
-
-            src.open("/" + masterPath, ios::binary);
-            dst.open("./imgFile/" + masterName, ios::binary);
-
-            if (src.fail()) cout << " Error 1: Fail to open the source file.";
-            else if (dst.fail()) cout << " Error 2: Fail to create the new file.";
-            else dst << src.rdbuf();
-
-            src.close();
-            dst.close();
-
-
-            cout << " Ok" << endl;
+            switch (copyFile("/" + masterPath, "./imgFile/" + masterName)) {
+                case 1:
+                    cout << "\e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
+                    break;
+                case 2:
+                    cout << "\e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                    break;
+                default:
+                    cout << " \e[32m√\e[0m" << endl;
+                    break;
+            }
 
 
             auto xmpPath = jsonAnnotation["_localOnly"]["files"]["original"]["xmp"]["path"].asString();
 
             if (!xmpPath.empty()) {
-                cout << "        \"" << xmpPath << "\" ";
 
-                string xmpName = split(masterName, ".").front() + '.' +getSuffix(xmpPath);
+                string xmpName = split(masterName, ".").front() + '.' + getSuffix(xmpPath);
 
-                cout << "\"./imgFile/" + xmpName + "\"";
+                cout << "        \"" << xmpPath << "\" => " << "\"./imgFile/" + xmpName + "\"";
 
-                ifstream src_xmp;
-                ofstream dst_xmp;
-
-                src_xmp.open("/" + xmpPath, ios::binary);
-                dst_xmp.open("./imgFile/" + xmpName, ios::binary);
-
-                if (src_xmp.fail()) cout << " Error 1: Fail to open the source file.";
-                else if (dst_xmp.fail()) cout << " Error 2: Fail to create the new file.";
-                else dst_xmp << src_xmp.rdbuf();
-
-                src_xmp.close();
-                dst_xmp.close();
-
-                cout << " Ok" << endl;
+                switch (copyFile(xmpPath, "./imgFile/" + xmpName)) {
+                    case 1:
+                        cout << "\e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
+                        break;
+                    case 2:
+                        cout << "\e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                        break;
+                    default:
+                        cout << " \e[32m√\e[0m" << endl;
+                        break;
+                }
             }
         }
     }
