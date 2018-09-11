@@ -29,7 +29,7 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <dirent.h>
-#include<sys/types.h>
+#include <sys/types.h>
 #include <regex>
 
 using namespace std;
@@ -49,13 +49,17 @@ struct DOC {
 };
 
 struct Line_AND_Space {
-    int space;
+    int space{};
     string line;
 };
 
 struct FileInfo {
     string masterPath;
     string xmpPath;
+    int localDocId;
+    int xmpSidecarExists;
+    bool deleted = false;
+    Json::Value annotation;
 };
 
 struct User {
@@ -201,11 +205,9 @@ int copyFile(string src_path, string dst_path) {
     ifstream src(src_path, ios::binary);
     ofstream dst(dst_path, ios::binary);
 
-    if (src.fail() || dst.fail()) goto closeStream;
+    if (src.good() && dst.good())
+        dst << src.rdbuf();
 
-    dst << src.rdbuf();
-
-    closeStream:
     src.close();
     dst.close();
 
@@ -252,9 +254,19 @@ vector<User> getUsers(string lrlib_path) {
 
 int main() {
 
-    DEFAULT_LRLIB = "/Users/" + getCurrentTerminalUesr() + "/Pictures/Lightroom Library.lrlibrary/";
+    cout << "Copyright (C) 2018, Pandorym (www.pandorym.com), released under the AGPLv3 license.\n"
+         << '\n'
+         << "  The program includes source code from: \n"
+         << "    1. SQLite3, Public domain;\n"
+         << "    2. sqlite3pp, released under the MIT license\n"
+         << "         Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com);\n"
+         << "    3. JsonCpp, Public Domain.\n"
+         << '\n'
+         << "------------------------------------------------------------------------------------------" << endl;
 
-    cout << DEFAULT_LRLIB << endl;
+    DEFAULT_LRLIB = "/Users/" + getCurrentTerminalUesr() + "/Pictures/Lightroom Library.lrlibrary";
+
+    cout << "\nLrLibrary path: " << DEFAULT_LRLIB << "\n\n";
 
     auto users = getUsers(DEFAULT_LRLIB);
 
@@ -263,21 +275,19 @@ int main() {
         cout << ++i << ". " << user.cat << " " << user.id << " \"" << user.name << "\" " << user.email << endl;
     }
 
-    cout << "select the user (Enter NO., default is \e[36m1\e[0m): ";
 
-    char *strUserNo;
-    cin.getline(strUserNo, 10);
+    string strUserNo;
+    cout << "\e[36mselect the user (Enter NO., default is \e[0m1\e[36m): \e[0m";
+    getline(cin, strUserNo);
+
     int userNo;
-    if (strUserNo[0] == '\0') userNo = 0;
-    else userNo = atoi(strUserNo) - 1;
+    if (strUserNo.empty()) userNo = 0;
+    else userNo = stoi(strUserNo) - 1;
 
-
-    string mcat_path = DEFAULT_LRLIB + users[userNo].cat + "/Managed Catalog.mcat";
+    string mcat_path = DEFAULT_LRLIB + '/' + users[userNo].cat + "/Managed Catalog.mcat";
 
     sqlite3pp::database db(mcat_path.c_str());
-    cout << "open mcat: " + mcat_path << endl;
-
-    system("mkdir imgFile");
+    cout << "\n> open mcat: " + mcat_path << "\n\n";
 
     sqlite3pp::query qry(db, "SELECT * FROM docs");
 
@@ -299,40 +309,85 @@ int main() {
         qty.total++;
     }
 
-    cout << "Total: " << qty.exist
-         << " (" << qty.total << "-" << qty.deleted << ")" << endl;
-
 
     vector<FileInfo> fileInfos;
 
     map<string, int> suffix;
 
     for (auto &doc : docs) {
-
-        Json::Value jsonAnnotation = parseAnnotation(doc.annotation);
-
         FileInfo fileInfo;
 
-        auto masterPath = jsonAnnotation["_localOnly"]["files"]["original"]["master"]["relativePath"].asString();
+        auto jsonAnnotation = parseAnnotation(doc.annotation);
 
-        if (!masterPath.empty() && !doc.deleted) {
 
-            cout << "Parse: " << doc.localDocId << "/" << docs.size() << " ";
+        fileInfo.localDocId = doc.localDocId;
+        fileInfo.masterPath = jsonAnnotation["_localOnly"]["files"]["original"]["master"]["relativePath"].asString();;
+        fileInfo.deleted = static_cast<bool>(doc.deleted);
+        fileInfo.xmpSidecarExists = jsonAnnotation["_localOnly"]["xmpSidecarExists"].asBool();
 
-            string masterName = getName(masterPath);
-            string masterSuffix = getSuffix(masterPath);
+        if (fileInfo.xmpSidecarExists) {
+            fileInfo.xmpPath = jsonAnnotation["_localOnly"]["files"]["original"]["xmp"]["path"].asString();
+        }
+
+        fileInfos.push_back(fileInfo);
+
+        if (!fileInfo.masterPath.empty() && !fileInfo.deleted) {
+            string masterSuffix = getSuffix(fileInfo.masterPath);
             transform(masterSuffix.begin(), masterSuffix.end(), masterSuffix.begin(), ::toupper);
             suffix[masterSuffix]++;
+        }
+    }
 
-            cout << doc.deleted << " " << doc.hasConflicts << " \"/" + masterPath << "\" => "
-                 << "\"./imgFile/" + masterName + "\"";
+    cout << "------------------------------" << endl;
+    cout << "Total: " << qty.exist
+         << " (" << qty.total << "-" << qty.deleted << ")" << endl;
+    unsigned long siffixWidth = 5;
+    for (auto &i : suffix) {
+        if (i.first.length() > siffixWidth) siffixWidth = i.first.length();
+    }
+    for (auto &i : suffix) {
+        cout.width(siffixWidth);
+        cout.setf(ios::left);
+        cout.fill(' ');
+        cout << i.first;
+        cout << ": " << i.second << endl;
+    }
+    cout << "------------------------------" << endl;
 
-            switch (copyFile("/" + masterPath, "./imgFile/" + masterName)) {
+    string consoleLine;
+    cout << "\e[36mAre you sure? (\e[0myes\e[36m/no\e[0m): ";
+    getline(cin, consoleLine);
+
+    if (consoleLine == "exit" || consoleLine == "quit" || consoleLine == "no") {
+        cout << "> exit LrccExpt" << endl;
+        return 0;
+    }
+
+    system("mkdir imgFile");
+
+    for (auto &fileInfo : fileInfos) {
+
+        cout << "\e[2J" << "\e[0;0H";
+        cout << "Parse: " << fileInfo.localDocId << "/" << fileInfos.size() << " ";
+
+        if (!fileInfo.masterPath.empty() && !fileInfo.deleted) {
+
+            cout << "Exporting files";
+
+            string masterName = getName(fileInfo.masterPath);
+
+
+            cout << "\n"
+                 << "  master: from \"/" + fileInfo.masterPath + "\"\n"
+                 << "            => \"./imgFile/" + masterName + "\""
+                 << flush;
+
+            switch (copyFile("/" + fileInfo.masterPath, "./imgFile/" + masterName)) {
                 case 1:
-                    cout << "\e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
+                    cout << " \e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
                     break;
                 case 2:
-                    cout << "\e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                    cout << " \e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
                     break;
                 default:
                     cout << " \e[32m√\e[0m" << endl;
@@ -340,34 +395,36 @@ int main() {
             }
 
 
-            auto xmpPath = jsonAnnotation["_localOnly"]["files"]["original"]["xmp"]["path"].asString();
+            if (fileInfo.xmpSidecarExists) {
 
-            if (!xmpPath.empty()) {
+                string xmpName = split(masterName, ".").front() + '.' + getSuffix(fileInfo.xmpPath);
 
-                string xmpName = split(masterName, ".").front() + '.' + getSuffix(xmpPath);
+                cout << "  xmp   : from \"" + fileInfo.xmpPath + "\"\n"
+                     << "            => \"./imgFile/" + xmpName + "\""
+                     << flush;
 
-                cout << "        \"" << xmpPath << "\" => " << "\"./imgFile/" + xmpName + "\"";
-
-                switch (copyFile(xmpPath, "./imgFile/" + xmpName)) {
+                switch (copyFile(fileInfo.xmpPath, "./imgFile/" + xmpName)) {
                     case 1:
-                        cout << "\e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
+                        cout << " \e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
                         break;
                     case 2:
-                        cout << "\e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                        cout << " \e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
                         break;
                     default:
                         cout << " \e[32m√\e[0m" << endl;
                         break;
                 }
             }
+        } else {
+            if (fileInfo.deleted)
+                cout << "file was deleted." << endl;
+            else if (fileInfo.masterPath.empty())
+                cout << "master path does not exist." << endl;
         }
     }
 
     cout << endl;
-    for (auto &i : suffix) {
-        cout << i.first << ": " << i.second << endl;
-    }
-
-    cout << "end" << endl;
+    cout << "done." << endl;
+    cout << "open the directory: " << "./imgFile\n" << endl;
 
 }
