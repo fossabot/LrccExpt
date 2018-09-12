@@ -56,6 +56,7 @@ struct Line_AND_Space {
 struct FileInfo {
     string masterPath;
     string xmpPath;
+    string xmpFile;
     int localDocId;
     int xmpSidecarExists;
     bool deleted = false;
@@ -160,11 +161,17 @@ Json::Value parseAnnotation(string rawAnnotation) {
             line.insert(line.begin() + space, '\"');
         }
 
+        while (line.back() == '\\') {
+            line.back() = '\n';
+            string nextLine;
+            getline(f, nextLine);
+            line += nextLine;
+        }
+
         currentLine.line = line;
         currentLine.space = space;
 
         if (LS.size() > 1) {
-
             Line_AND_Space lastLine = LS.back();
             if (lastLine.space > currentLine.space) {
                 lastLine.line.pop_back();
@@ -252,6 +259,10 @@ vector<User> getUsers(string lrlib_path) {
     return Users;
 }
 
+sqlite3pp::query *query(sqlite3pp::database &db, char const *stmt) {
+    return new sqlite3pp::query(db, stmt);
+}
+
 int main() {
 
     cout << "Copyright (C) 2018, Pandorym (www.pandorym.com), released under the AGPLv3 license.\n"
@@ -289,12 +300,10 @@ int main() {
     sqlite3pp::database db(mcat_path.c_str());
     cout << "\n> open mcat: " + mcat_path << "\n\n";
 
-    sqlite3pp::query qry(db, "SELECT * FROM docs");
-
     QTY qty;
     vector<DOC> docs;
 
-    for (auto v : qry) {
+    for (auto v : *query(db, "SELECT * FROM docs")) {
         DOC doc;
         v.getter() >> doc.localDocId
                    >> doc.fullDocId
@@ -323,10 +332,21 @@ int main() {
         fileInfo.localDocId = doc.localDocId;
         fileInfo.masterPath = jsonAnnotation["_localOnly"]["files"]["original"]["master"]["relativePath"].asString();;
         fileInfo.deleted = static_cast<bool>(doc.deleted);
-        fileInfo.xmpSidecarExists = jsonAnnotation["_localOnly"]["xmpSidecarExists"].asBool();
+        fileInfo.xmpSidecarExists = jsonAnnotation["_localOnly"]["xmpSidecarExists"].asBool(); // false = 0, true = 1
 
-        if (fileInfo.xmpSidecarExists) {
+        if (fileInfo.xmpSidecarExists) { // 1
             fileInfo.xmpPath = jsonAnnotation["_localOnly"]["files"]["original"]["xmp"]["path"].asString();
+        } else {
+            string strContent;
+            (*query(db, ("SELECT content FROM revs WHERE sequence=" + to_string(doc.winningRevSequence)).c_str())->begin())
+                    .getter() >> strContent;
+            auto content = parseAnnotation(strContent);
+
+            if (content["develop"]["xmpCameraRaw"].isString()) {
+                fileInfo.xmpSidecarExists = 2;
+                fileInfo.xmpPath = "revs[sequence=" + to_string(doc.winningRevSequence) + "].develop.xmpCameraRaw";
+                fileInfo.xmpFile = content["develop"]["xmpCameraRaw"].asString();
+            }
         }
 
         fileInfos.push_back(fileInfo);
@@ -394,24 +414,43 @@ int main() {
                     break;
             }
 
-
-            if (fileInfo.xmpSidecarExists) {
-
-                string xmpName = split(masterName, ".").front() + '.' + getSuffix(fileInfo.xmpPath);
+            if (fileInfo.xmpSidecarExists != 0) {
+                string xmpName = split(masterName, ".").front() + '.'
+                                 + (fileInfo.xmpSidecarExists == 2 ? "xmp" : getSuffix(fileInfo.xmpPath));
 
                 cout << "  xmp   : from \"" + fileInfo.xmpPath + "\"\n"
                      << "            => \"./imgFile/" + xmpName + "\""
                      << flush;
 
-                switch (copyFile(fileInfo.xmpPath, "./imgFile/" + xmpName)) {
+                ofstream xmp;
+                switch (fileInfo.xmpSidecarExists) {
                     case 1:
-                        cout << " \e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
+                        cout << "ABC\n";
+                        switch (copyFile(fileInfo.xmpPath, "./imgFile/" + xmpName)) {
+                            case 1:
+                                cout << " \e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
+                                break;
+                            case 2:
+                                cout << " \e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                                break;
+                            default:
+                                cout << " \e[32m√\e[0m" << endl;
+                                break;
+                        }
                         break;
                     case 2:
-                        cout << " \e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                        xmp.open("./imgFile/" + xmpName, ios::ate);
+                        if (xmp.good()) {
+                            xmp << fileInfo.xmpFile << flush;
+                            xmp.close();
+                            cout << " \e[32m√\e[0m" << endl;
+                        }
+                        else {
+                            cout << " \e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
+                            xmp.close();
+                        }
                         break;
                     default:
-                        cout << " \e[32m√\e[0m" << endl;
                         break;
                 }
             }
@@ -423,8 +462,9 @@ int main() {
         }
     }
 
-    cout << endl;
-    cout << "done." << endl;
-    cout << "open the directory: " << "./imgFile\n" << endl;
+    cout << "\n"
+         << "done.\n"
+         << "\n"
+         << "open the directory: " << "./imgFile\n" << endl;
 
 }
