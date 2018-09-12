@@ -1,23 +1,17 @@
 cmake_minimum_required(VERSION 3.10)
 project(LrccExpt)
 
+IF (CMAKE_BUILD_TYPE MATCHES "Release")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+ENDIF ()
+
 set(CMAKE_CXX_STANDARD 11)
 
 include_directories(sqlite3)
 link_directories(sqlite3)
 link_libraries(sqlite3)
 
-include_directories(json)
-link_directories(json)
-link_libraries(json)
-
-
-add_library(
-        sqlite3
-        sqlite3/sqlite3.h
-        sqlite3/sqlite3.c
-        sqlite3/sqlite3ext.h
-)
 add_library(
         json
         json/json.h
@@ -25,3 +19,4 @@ add_library(
 )
 
 add_executable(LrccExpt main.cpp)
+target_link_libraries(LrccExpt json)
