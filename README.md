@@ -16,6 +16,7 @@ LrccExpt
 ```
 
 ## LICENSE
+```
 Copyright (C) 2018, Pandorym (www.pandorym.com), released under the AGPLv3 license.
 
   The program includes source code from:
@@ -23,3 +24,4 @@ Copyright (C) 2018, Pandorym (www.pandorym.com), released under the AGPLv3 licen
     2. sqlite3pp, released under the MIT license
          Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com);
     3. JsonCpp, Public Domain.
+```
