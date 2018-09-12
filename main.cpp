@@ -35,6 +35,7 @@
 using namespace std;
 
 string DEFAULT_LRLIB;
+string DEFAULT_OUTDIR;
 
 /* quantity */
 struct QTY {
@@ -276,6 +277,16 @@ int main() {
          << "------------------------------------------------------------------------------------------" << endl;
 
     DEFAULT_LRLIB = "/Users/" + getCurrentTerminalUesr() + "/Pictures/Lightroom Library.lrlibrary";
+    DEFAULT_OUTDIR = "./Lrcc_Export_File";
+
+    string consoleLine;
+    cout << "\e[36mInput LrLibrary path (default is \e[0m" << DEFAULT_LRLIB << "\e[36m): \e[0m";
+    getline(cin, consoleLine);
+
+    if (!consoleLine.empty()) {
+        DEFAULT_LRLIB = consoleLine;
+    }
+
 
     cout << "\nLrLibrary path: " << DEFAULT_LRLIB << "\n\n";
 
@@ -374,7 +385,6 @@ int main() {
     }
     cout << "------------------------------" << endl;
 
-    string consoleLine;
     cout << "\e[36mAre you sure? (\e[0myes\e[36m/no\e[0m): ";
     getline(cin, consoleLine);
 
@@ -383,7 +393,16 @@ int main() {
         return 0;
     }
 
-    system("mkdir imgFile");
+    cout << "\n\e[36mInput Export path (default is \e[0m" << DEFAULT_OUTDIR << "\e[36m): \e[0m";
+    getline(cin, consoleLine);
+
+    if (!consoleLine.empty()) {
+        DEFAULT_OUTDIR = consoleLine;
+    }
+
+    cout << endl;
+
+    system(("mkdir " + DEFAULT_OUTDIR).c_str());
 
     for (auto &fileInfo : fileInfos) {
 
@@ -395,14 +414,15 @@ int main() {
             cout << "Exporting files";
 
             string masterName = getName(fileInfo.masterPath);
+            string masterOutpath = DEFAULT_OUTDIR + '/' + masterName;
 
 
             cout << "\n"
                  << "  master: from \"/" + fileInfo.masterPath + "\"\n"
-                 << "            => \"./imgFile/" + masterName + "\""
+                 << "            => \"" + masterOutpath + "\""
                  << flush;
 
-            switch (copyFile("/" + fileInfo.masterPath, "./imgFile/" + masterName)) {
+            switch (copyFile("/" + fileInfo.masterPath, masterOutpath)) {
                 case 1:
                     cout << " \e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
                     break;
@@ -417,16 +437,17 @@ int main() {
             if (fileInfo.xmpSidecarExists != 0) {
                 string xmpName = split(masterName, ".").front() + '.'
                                  + (fileInfo.xmpSidecarExists == 2 ? "xmp" : getSuffix(fileInfo.xmpPath));
+                string xmpOutpath = DEFAULT_OUTDIR + '/' + xmpName;
 
                 cout << "  xmp   : from \"" + fileInfo.xmpPath + "\"\n"
-                     << "            => \"./imgFile/" + xmpName + "\""
+                     << "            => \"" + xmpOutpath + "\""
                      << flush;
 
                 ofstream xmp;
                 switch (fileInfo.xmpSidecarExists) {
                     case 1:
                         cout << "ABC\n";
-                        switch (copyFile(fileInfo.xmpPath, "./imgFile/" + xmpName)) {
+                        switch (copyFile(fileInfo.xmpPath, xmpOutpath)) {
                             case 1:
                                 cout << " \e[31m×\n    Error : Fail to open the source file.\e[0m" << endl;
                                 break;
@@ -439,13 +460,12 @@ int main() {
                         }
                         break;
                     case 2:
-                        xmp.open("./imgFile/" + xmpName, ios::ate);
+                        xmp.open(xmpOutpath, ios::ate);
                         if (xmp.good()) {
                             xmp << fileInfo.xmpFile << flush;
                             xmp.close();
                             cout << " \e[32m√\e[0m" << endl;
-                        }
-                        else {
+                        } else {
                             cout << " \e[31m×\n    Error: Fail to create the new file.\e[0m" << endl;
                             xmp.close();
                         }
@@ -465,6 +485,6 @@ int main() {
     cout << "\n"
          << "done.\n"
          << "\n"
-         << "open the directory: " << "./imgFile\n" << endl;
+         << "open the directory: " << DEFAULT_OUTDIR << endl;
 
 }
