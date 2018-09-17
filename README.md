@@ -1,4 +1,6 @@
 # LrccExpt
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FPandorym%2FLrccExpt.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2FPandorym%2FLrccExpt?ref=badge_shield)
+
 A command-line tool for exporting ORIGINAL PHOTO, XMP, etc. from Lightroom CC (not Lightroom Classic CC).  🎫
 
 This is a way to transfer your photos (and develop) from Lightroom CC to Lightroom Classic CC.
@@ -25,3 +27,6 @@ Copyright (C) 2018, Pandorym (www.pandorym.com), released under the AGPLv3 licen
          Copyright (c) 2015 Wongoo Lee (iwongu at gmail dot com);
     3. JsonCpp, Public Domain.
 ```
+
+
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FPandorym%2FLrccExpt.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2FPandorym%2FLrccExpt?ref=badge_large)
